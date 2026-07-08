@@ -1,0 +1,20 @@
+{
+  "/remote/assets": {
+    "target": "https://client-fe-static-qa.nednet.co.za",
+    "secure": false,
+    "changeOrigin": true,
+    "pathRewrite": {
+      "^/remote/assets": "/art-client/main/assets"
+    },
+    "logLevel": "debug"
+  },
+  "/remote/configurations": {
+    "target": "https://client-fe-static-qa.nednet.co.za",
+    "secure": false,
+    "changeOrigin": true,
+    "pathRewrite": {
+      "^/remote/configurations": "/art-client/main/configurations"
+    },
+    "logLevel": "debug"
+  }
+}
