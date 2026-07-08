@@ -5,6 +5,7 @@
     "ng": "ng",
     "start": "ng serve",
     "start:qa-proxy": "ng serve --proxy-config proxy.qa.conf.json",
+    "start:ete-proxy": "ng serve --proxy-config proxy.ete.conf.json",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
