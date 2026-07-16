@@ -1,7 +1,7 @@
 import { Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
 import { loadRemoteModule } from '@angular-architects/module-federation';
 
-type RemoteUnmount = () => void;
+type RemoteUnmount = () => void | Promise<void>;
 
 type RemoteOptions = {
   configurationBaseUrl?: string;
@@ -13,6 +13,23 @@ type RemoteOptions = {
 type NcepRemoteModule = {
   mount: (container: HTMLElement, options?: RemoteOptions) => Promise<RemoteUnmount>;
 };
+
+const dashboardAuthentications = [
+  {
+    userType: 'staff',
+    userID: 'NB184826',
+    authenticationMethod: 'domain',
+    authenticationTime: '2025-07-14T07:42:42.97',
+    authenticationStatus: 'successful',
+  },
+  {
+    userType: 'party',
+    userID: '6000000432',
+    authenticationMethod: 'manual staff assisted',
+    authenticationTime: '2025-07-14T07:42:42.97',
+    authenticationStatus: 'successful',
+  },
+];
 
 const localJwt = decodeURIComponent(
   'eyJ0eXAiOiJKV1QiLCJraWQiOiI2TUdyamFqMHZ4Q09tSU9uVE1RTHpmUkUwM0oyYnN6NmVIUE1RNDFDMGNJIiwiYWxnIjoiUlMyNTYifQ.eyJpc3MiOiAiaHR0cHM6Ly9pZHAubmVkYmFuay5jby56YSIsICJ0b2tlbl90eXBlIjogIkJlYXJlciIsICJzZXNzaW9uaWQiOiAiYzk4MjQ5NGMtMGRjZi00MTNjLWE1MzktYWEyMzcwNDliOGM5IiwgImF1ZCI6ICJmZGYxZTk3Zi1iNTJkLTQ5NGMtOTQ3NS1mOGY2NTFhMDkxY2QiLCAieC1uZWQtdGVuYW50LWNvZGUiOiAiWkFOQkwiLCAibmlkc3AiOiAiMjciLCAiY2lkIjogIjM5NyIsICJpYXQiOiAxNzYwOTQ0NTE5LCAiZXhwIjogMTc2MDk1MTcxOSwgIm5iZiI6IDE3NjA5NDQ1MTksICJncmFudF90eXBlIjogImFub255bW91cyIsICJhbXIiOiBbXSwgInNjb3BlcyI6IFtdfQ%3D%3D.o36DbF25c_CMhQAyFPE9FW0qot59LH3BI4FXapyidM2AwZtqlb948pXkwXVbcr5I7a4dlFr6kscLZLZLoGxJsAakQZKwotix4MWoXnAsC9AyPxUOxbmImeSQ2LIo_NXVf9UTIejGsG_Jwxd03xZIeVsBtqaZz_nU2Z9Wq-IzX7sWgHv80QWGZviJGSsExTGcQmhN5jxU7zzZzsXOqOKAvyO6kgJc1lO9OKSMR7hC0ryPYWTNdiSDACK8LdHWZPBQ5dQ3X_hWNsOHGW5oPyQagHUSbljhRsdvxmR7_KhyjsGnYMN_xloA6lHan-Lw66fjMBMkSTiOzqu93YFBQSCP1A',
@@ -38,6 +55,9 @@ const localJwt = decodeURIComponent(
           (click)="mountDashboard(dashboardEpn)"
         >
           Open dashboard
+        </button>
+        <button type="button" (click)="unmountMicrosite()">
+          Remove microsite
         </button>
       </div>
       <div #remoteHost class="remote-host"></div>
@@ -102,6 +122,8 @@ export class NcepRemoteComponent implements OnDestroy {
   private readonly remoteHost!: ElementRef<HTMLElement>;
 
   private unmount?: RemoteUnmount;
+  private lifecycleOperation: Promise<void> = Promise.resolve();
+  private destroyed = false;
 
   async mountDefault(): Promise<void> {
     await this.mountRemote();
@@ -131,32 +153,72 @@ export class NcepRemoteComponent implements OnDestroy {
           type: 'open-dashboard',
           epn: normalizedEpn,
         },
+        authentications: dashboardAuthentications,
       },
+    });
+  }
+
+  async unmountMicrosite(): Promise<void> {
+    await this.enqueueLifecycleOperation(async () => {
+      try {
+        await this.performUnmount();
+      } finally {
+        this.dashboardEpn = '';
+      }
     });
   }
 
   ngOnDestroy(): void {
-    this.unmount?.();
+    this.destroyed = true;
+    void this.enqueueLifecycleOperation(() => this.performUnmount());
   }
 
   private async mountRemote(options: RemoteOptions = {}): Promise<void> {
-    this.unmount?.();
-    this.remoteHost.nativeElement.replaceChildren();
+    await this.enqueueLifecycleOperation(async () => {
+      await this.performUnmount();
+      if (this.destroyed) return;
 
-    const remote = (await loadRemoteModule({
-      type: 'module',
-      remoteEntry: this.remoteEntry,
-      exposedModule: './App',
-    })) as NcepRemoteModule;
+      const remote = (await loadRemoteModule({
+        type: 'module',
+        remoteEntry: this.remoteEntry,
+        exposedModule: './App',
+      })) as NcepRemoteModule;
+      if (this.destroyed) return;
 
-    console.log(this.jwt);
-    this.unmount = await remote.mount(this.remoteHost.nativeElement, {
-      configurationBaseUrl: this.configurationBaseUrl,
-      ...options,
-      initialFormValues: {
-        jwt: this.jwt,
-        ...options.initialFormValues,
-      },
+      console.log(this.jwt);
+      const unmount = await remote.mount(this.remoteHost.nativeElement, {
+        configurationBaseUrl: this.configurationBaseUrl,
+        ...options,
+        initialFormValues: {
+          jwt: this.jwt,
+          ...options.initialFormValues,
+        },
+      });
+
+      if (this.destroyed) {
+        await unmount();
+        this.remoteHost.nativeElement.replaceChildren();
+        return;
+      }
+
+      this.unmount = unmount;
     });
+  }
+
+  private async performUnmount(): Promise<void> {
+    const unmount = this.unmount;
+    this.unmount = undefined;
+
+    try {
+      await unmount?.();
+    } finally {
+      this.remoteHost.nativeElement.replaceChildren();
+    }
+  }
+
+  private enqueueLifecycleOperation(operation: () => Promise<void>): Promise<void> {
+    const nextOperation = this.lifecycleOperation.then(operation, operation);
+    this.lifecycleOperation = nextOperation.catch(() => undefined);
+    return nextOperation;
   }
 }
