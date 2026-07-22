@@ -1,8 +1,41 @@
 import { TestBed } from '@angular/core/testing';
+import { loadRemoteModule } from '@angular-architects/module-federation';
 
 import { NcepRemoteComponent } from './ncep-remote.component';
 
+vi.mock('@angular-architects/module-federation', () => ({
+  loadRemoteModule: vi.fn(),
+}));
+
 describe('NcepRemoteComponent', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('receives a newly created client EPN from the remote', async () => {
+    const unmount = vi.fn();
+    const mount = vi.fn().mockResolvedValue(unmount);
+    vi.mocked(loadRemoteModule).mockResolvedValue({ mount } as never);
+
+    await TestBed.configureTestingModule({
+      imports: [NcepRemoteComponent],
+    }).compileComponents();
+
+    const fixture = TestBed.createComponent(NcepRemoteComponent);
+    fixture.detectChanges();
+
+    await fixture.componentInstance.mountCreateClient();
+
+    const remoteOptions = mount.mock.calls[0][1];
+    remoteOptions.onHostEvent({
+      id: 'client-created:6000000999',
+      type: 'client-created',
+      payload: { epn: ' 6000000999 ' },
+    });
+
+    expect(Reflect.get(fixture.componentInstance, 'dashboardEpn')()).toBe('6000000999');
+  });
+
   it('unmounts the microsite and restores the initial shell state', async () => {
     await TestBed.configureTestingModule({
       imports: [NcepRemoteComponent],

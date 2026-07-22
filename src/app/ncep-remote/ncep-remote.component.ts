@@ -1,11 +1,18 @@
-import { Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
+import { Component, ElementRef, OnDestroy, signal, ViewChild } from '@angular/core';
 import { loadRemoteModule } from '@angular-architects/module-federation';
 
 type RemoteUnmount = () => void | Promise<void>;
 
+type RemoteHostEvent = {
+  id: string;
+  type: string;
+  payload?: Record<string, unknown>;
+};
+
 type RemoteOptions = {
   configurationBaseUrl?: string;
   initialFormValues?: Record<string, unknown>;
+  onHostEvent?: (event: RemoteHostEvent) => void | Promise<void>;
   profilingEnabled?: boolean;
   strictMode?: boolean;
 };
@@ -46,19 +53,17 @@ const localJwt = decodeURIComponent(
         <input
           type="text"
           placeholder="EPN"
-          [value]="dashboardEpn"
-          (input)="dashboardEpn = $any($event.target).value"
+          [value]="dashboardEpn()"
+          (input)="dashboardEpn.set($any($event.target).value)"
         />
         <button
           type="button"
-          [disabled]="!dashboardEpn.trim()"
-          (click)="mountDashboard(dashboardEpn)"
+          [disabled]="!dashboardEpn().trim()"
+          (click)="mountDashboard(dashboardEpn())"
         >
           Open dashboard
         </button>
-        <button type="button" (click)="unmountMicrosite()">
-          Remove microsite
-        </button>
+        <button type="button" (click)="unmountMicrosite()">Remove microsite</button>
       </div>
       <div #remoteHost class="remote-host"></div>
     </main>
@@ -116,7 +121,7 @@ export class NcepRemoteComponent implements OnDestroy {
   private readonly remoteEntry = '/remote/assets/remoteEntry.js';
   private readonly configurationBaseUrl = '/remote/configurations';
   private readonly jwt = new URLSearchParams(window.location.search).get('jwt')?.trim() || localJwt;
-  protected dashboardEpn = '';
+  protected readonly dashboardEpn = signal('');
 
   @ViewChild('remoteHost', { static: true })
   private readonly remoteHost!: ElementRef<HTMLElement>;
@@ -124,6 +129,21 @@ export class NcepRemoteComponent implements OnDestroy {
   private unmount?: RemoteUnmount;
   private lifecycleOperation: Promise<void> = Promise.resolve();
   private destroyed = false;
+
+  private readonly handleHostEvent = (event: RemoteHostEvent): void => {
+    console.log('[ncep-angular-shell] Host event received:', event);
+
+    if (event.type !== 'client-created') {
+      return;
+    }
+
+    const value = event.payload?.['epn'];
+    const epn = typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
+
+    if (epn && epn !== this.dashboardEpn()) {
+      this.dashboardEpn.set(epn);
+    }
+  };
 
   async mountDefault(): Promise<void> {
     await this.mountRemote();
@@ -163,7 +183,7 @@ export class NcepRemoteComponent implements OnDestroy {
       try {
         await this.performUnmount();
       } finally {
-        this.dashboardEpn = '';
+        this.dashboardEpn.set('');
       }
     });
   }
@@ -185,10 +205,10 @@ export class NcepRemoteComponent implements OnDestroy {
       })) as NcepRemoteModule;
       if (this.destroyed) return;
 
-      console.log(this.jwt);
       const unmount = await remote.mount(this.remoteHost.nativeElement, {
         configurationBaseUrl: this.configurationBaseUrl,
         ...options,
+        onHostEvent: this.handleHostEvent,
         initialFormValues: {
           jwt: this.jwt,
           ...options.initialFormValues,
